@@ -218,7 +218,6 @@ def get_user(name, profile='github', user_details=False):
         # User is in the org, no need for additional Data
         return True
 
-    response = {}
     client = _get_client(profile)
     organization = client.get_organization(
         _get_config_value(profile, 'org_name')
@@ -230,15 +229,7 @@ def get_user(name, profile='github', user_details=False):
         log.exception("Resource not found {0}: ".format(str(e)))
         return False
 
-    response['company'] = user.company
-    response['created_at'] = user.created_at
-    response['email'] = user.email
-    response['html_url'] = user.html_url
-    response['id'] = user.id
-    response['login'] = user.login
-    response['name'] = user.name
-    response['type'] = user.type
-    response['url'] = user.url
+    response = _user_to_dict(user)
 
     try:
         headers, data = organization._requester.requestJsonAndCheck(
@@ -723,8 +714,103 @@ def get_milestone(number=None,
     return ret
 
 
+def _commit_to_dict(commit):
+    ret = {}
+    if (not commit or not commit.sha):
+        return ret
+
+    ret['sha'] = commit.sha
+    ret['url'] = commit.url
+    ret['html_url'] = commit.html_url
+    ret['comments_url'] = commit.comments_url
+    ret['commit'] = commit.commit
+    ret['author'] = _user_to_dict(commit.author)
+    ret['committer'] = _user_to_dict(commit.committer)
+    ret['parents'] = commit.parents
+    return ret
+
+
+def _hook_to_dict(hook):
+    ret = {}
+    if (not hook or not hook.id):
+        return ret
+
+    ret['id'] = hook.id
+    ret['name'] = hook.name
+    ret['active'] = hook.active
+    ret['events'] = hook.events
+    ret['config'] = hook.config
+    ret['url'] = hook.url
+    ret['test_url'] = hook.test_url
+    return ret
+
+
+def _team_to_dict(team):
+    ret = {}
+    if (not team or not team.id):
+        return ret
+
+    ret['id'] = team.id
+    ret['name'] = team.name
+    ret['url'] = team.url
+    ret['slug'] = team.slug
+    ret['permission'] = team.permission
+    ret['members_url'] = team.members_url
+    ret['repositories_url'] = team.repositories_url
+    # For some bizarre reason, these 2 don't get set as actual properties of github.Team
+    ret['description'] = team._rawData['description']
+    ret['privacy'] = team._rawData['privacy']
+    return ret
+
+
+def _user_to_dict(user):
+    ret = {}
+    if (not user or not user.id):
+        return ret
+
+    ret['id'] = user.id
+    ret['login'] = user.login
+    ret['email'] = user.email
+    ret['name'] = user.name
+    ret['type'] = user.type
+    ret['url'] = user.url
+    ret['html_url'] = user.html_url
+    ret['avatar_url'] = user.avatar_url
+    ret['gravatar_id'] = user.gravatar_id
+    ret['followers_url'] = user.followers_url
+    ret['following_url'] = user.following_url
+    ret['gists_url'] = user.gists_url
+    ret['starred_url'] = user.starred_url
+    ret['subscriptions_url'] = user.subscriptions_url
+    ret['organizations_url'] = user.organizations_url
+    ret['repos_url'] = user.repos_url
+    ret['events_url'] = user.events_url
+    ret['received_events_url'] = user.received_events_url
+
+    # The following are not always present, so skip if not present
+    try:
+        ret['company'] = user.company
+    except AttributeError:
+        pass
+
+    try:
+        ret['site_admin'] = user.site_admin
+    except AttributeError:
+        pass
+
+    try:
+        ret['created_at'] = user.created_at
+    except AttributeError:
+        pass
+
+    return ret
+
+
 def _repo_to_dict(repo):
     ret = {}
+    if (not repo or not repo.id):
+        return ret
+
     ret['id'] = repo.id
     ret['name'] = repo.name
     ret['full_name'] = repo.full_name
@@ -800,6 +886,101 @@ def get_repo_info(repo_name, profile='github', ignore_cache=False):
     return __context__[key]
 
 
+def get_repo_hooks(repo_name, profile='github'):
+    '''
+    Return hooks set for a repository.
+
+    repo_name
+        The name of the repository from which to retrieve hooks.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.get_repo_hooks salt
+        salt myminion github.get_repo_hooks salt profile='my-github-profile'
+    '''
+    ret = []
+    org_name = _get_config_value(profile, 'org_name')
+    client = _get_client(profile)
+
+    try:
+        repo = client.get_repo('/'.join([org_name, repo_name]))
+    except github.UnknownObjectException:
+        raise CommandExecutionError(
+            'The \'{0}\' repository under the \'{1}\' organization could not '
+            'be found.'.format(repo_name, org_name)
+        )
+    try:
+        hooks = repo.get_hooks()
+        for hook in hooks:
+            ret.append(_hook_to_dict(hook))
+    except github.UnknownObjectException:
+        raise CommandExecutionError(
+            'Unable to retrieve hooks for repository \'{0}\' under the \'{1}\' '
+            'organization.'.format(repo_name, org_name)
+        )
+    return ret
+
+
+def get_repo_commits(repo_name, profile='github', latest_only=False):
+    '''
+    Return commits for a repository.
+
+    repo_name
+        The name of the repository from which to retrieve commits.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    latest_only
+        If we only care about getting the latest commits only
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.get_repo_commits salt
+        salt myminion github.get_repo_commits salt profile='my-github-profile'
+    '''
+    ret = []
+    org_name = _get_config_value(profile, 'org_name')
+    client = _get_client(profile)
+
+    try:
+        repo = client.get_repo('/'.join([org_name, repo_name]))
+    except github.UnknownObjectException:
+        raise CommandExecutionError(
+            'The \'{0}\' repository under the \'{1}\' organization could not '
+            'be found.'.format(repo_name, org_name)
+        )
+    try:
+        commits = repo.get_commits()
+
+        if (latest_only and commits):
+            r = commits.reversed
+            commits = r.get_page(0)
+
+        for commit in commits:
+            ret.append(_commit_to_dict(commit))
+    except github.UnknownObjectException:
+        raise CommandExecutionError(
+            'Unable to retrieve commits for repository \'{0}\' under the \'{1}\' '
+            'organization.'.format(repo_name, org_name)
+        )
+    except github.GithubException as ex:
+        # Status 409 means that the repo is empty. All others should throw the exception
+        if ex.status != 409:
+            raise CommandExecutionError(
+                'Unable to retrieve commits for repository \'{0}\' under the \'{1}\' '
+                'organization.'.format(repo_name, org_name)
+            )
+    return ret
+
+
 def get_repo_teams(repo_name, profile='github'):
     '''
     Return teams belonging to a repository.
@@ -833,11 +1014,7 @@ def get_repo_teams(repo_name, profile='github'):
     try:
         teams = repo.get_teams()
         for team in teams:
-            ret.append({
-                'id': team.id,
-                'name': team.name,
-                'permission': team.permission
-            })
+            ret.append(_team_to_dict(team))
     except github.UnknownObjectException:
         raise CommandExecutionError(
             'Unable to retrieve teams for repository \'{0}\' under the \'{1}\' '
@@ -929,7 +1106,7 @@ def add_repo(name,
     Create a new github repository.
 
     name
-        The name of the team to be created.
+        The name of the repository to be created.
 
     description
         The description of the repository.
@@ -1014,7 +1191,7 @@ def edit_repo(name,
     Updates an existing Github repository.
 
     name
-        The name of the team to be created.
+        The name of the repository to be edited.
 
     description
         The description of the repository.
@@ -1702,16 +1879,179 @@ def list_teams(profile="github", ignore_cache=False):
             # are not exposed in older versions of PyGithub. It's VERY important
             # to use team._rawData instead of team.raw_data, as the latter forces
             # an API call to retrieve team details again.
-            teams[team.name] = {
-                'id': team.id,
-                'slug': team.slug,
-                'description': team._rawData['description'],
-                'permission': team.permission,
-                'privacy': team._rawData['privacy']
-            }
+            teams[team.name] = _team_to_dict(team)
         __context__[key] = teams
 
     return __context__[key]
+
+
+def add_repo_hook(repo_name, hook_name, profile="github", active=True,
+                  events=None, config=None):
+    '''
+    Adds a hook to a repository
+
+    repo_name
+        The name of the repository.
+
+    hook_name
+        The name of the hook to add to the repository.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    active
+        boolean: Whether the hook is currently active. Defaults to True
+
+    events
+        List of events to fire this hook on.
+
+    config
+        Dict of settings that GitHub has for the particular hook
+
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.add_repo_hook 'my_repo' 'hook_name' events=["push", "pull_request"]
+        salt myminion github.add_repo_hook 'my_repo' 'irc' events=["push", "pull_request"] config={"server":"example.com","room":"#myroom"}
+
+    '''
+
+    try:
+        client = _get_client(profile)
+        organization = client.get_organization(
+            _get_config_value(profile, 'org_name')
+        )
+        repo = organization.get_repo(repo_name)
+    except UnknownObjectException as e:
+        log.exception('Resource not found: {0}'.format(team['id']))
+        return False
+
+    if config is None:
+        raise CommandExecutionError(
+            '"config" is a required value when creating a hook on a repository'
+        )
+
+    params = {'active': active}
+    if events is not None:
+        params.update({'events': events})
+
+    repo.create_hook(hook_name, config, **params)
+    return True
+
+
+def edit_repo_hook(repo_name, hook_name, profile="github", active=True,
+                  events=None, config=None):
+    '''
+    Updates a hook on a repository
+
+    repo_name
+        The name of the repository.
+
+    hook_name
+        The name of the hook to update on the repository.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    active
+        boolean: Whether the hook is currently active. Defaults to True
+
+    events
+        List of events to fire this hook on.
+
+    config
+        Dict of settings that GitHub has for the particular hook
+
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.edit_repo_hook 'my_repo' 'hook_name' events=["push", "pull_request"]
+        salt myminion github.edit_repo_hook 'my_repo' 'irc' events=["push", "pull_request"] config={"server":"example.com","room":"#myroom"}
+
+    '''
+
+    try:
+        client = _get_client(profile)
+        organization = client.get_organization(
+            _get_config_value(profile, 'org_name')
+        )
+        repo = organization.get_repo(repo_name)
+    except UnknownObjectException as e:
+        log.exception('Resource not found: {0}'.format(team['id']))
+        return False
+
+    if config is None:
+        raise CommandExecutionError(
+            '"config" is a required value when creating a hook on a repository'
+        )
+
+    params = {'active': active}
+    if events is not None:
+        params.update({'events': events})
+
+    matches = []
+    hooks = repo.get_hooks()
+    for hook in hooks:
+        if hook.name == hook_name:
+            matches.append(hook)
+
+    if len(matches) > 1:
+        raise CommandExecutionError(
+                'Multiple hooks on the {} repository matched the name: {}'.format(repo_name, hook_name)
+        )
+
+    matches[0].edit(hook_name, config, **params)
+    return True
+
+
+def remove_repo_hook(repo_name, hook_name, profile="github"):
+    '''
+    Removes a hook from a repository
+
+    repo_name
+        The name of the repository
+
+    hook_name
+        The name of the hook to remove from the repository.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.remove_repo_hook 'my_repo' 'hook_name'
+
+    .. versionadded:: Carbon
+    '''
+
+    try:
+        client = _get_client(profile)
+        organization = client.get_organization(
+            _get_config_value(profile, 'org_name')
+        )
+        repo = organization.get_repo(repo_name)
+    except UnknownObjectException as e:
+        log.exception('Resource not found: {0}'.format(team['id']))
+        return False
+
+    matches = []
+    hooks = repo.get_hooks()
+    for hook in hooks:
+        if hook.name == hook_name:
+            matches.append(hook)
+
+    if len(matches) > 1:
+        raise CommandExecutionError(
+                'Multiple hooks on the {} repository matched the name: {}'.format(repo_name, hook_name)
+        )
+    matches[0].delete()
+    return True
 
 
 def _format_issue(issue):
