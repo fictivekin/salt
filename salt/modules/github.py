@@ -714,6 +714,111 @@ def get_milestone(number=None,
     return ret
 
 
+def get_releases(repo_name=None,
+               profile='github'):
+    '''
+    Returns information for all releases (aka: downloads) in a given repository
+
+    .. versionadded:: Carbon
+
+    repo_name
+        The name of the repository for which to list issues. This argument is
+        required, either passed via the CLI, or defined in the configured
+        profile. A ``repo_name`` passed as a CLI argument will override the
+        repo_name defined in the configured profile, if provided.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.get_releases my-github-repo
+    '''
+    client = _get_client(profile)
+    org_name = _get_config_value(profile, 'org_name')
+
+    if repo_name is None:
+        repo_name = _get_config_value(profile, 'repo_name')
+
+    try:
+        repo = client.get_repo('/'.join([org_name, repo_name]))
+    except UnknownObjectException as e:
+        log.exception("Resource not found: {0}".format(str(e)))
+        return False
+
+    ret = {}
+    releases = repo.get_releases()
+
+    for release in releases:
+        ret[release.id] = _release_to_dict(release)
+
+    return ret
+
+
+def get_release(release_id, repo_name=None,
+               profile='github'):
+    '''
+    Returns information for a release (aka: downloads) in a given repository
+
+    .. versionadded:: Carbon
+
+    id
+        The release id specified in GitHub. This argument is required.
+
+    repo_name
+        The name of the repository for which to list issues. This argument is
+        required, either passed via the CLI, or defined in the configured
+        profile. A ``repo_name`` passed as a CLI argument will override the
+        repo_name defined in the configured profile, if provided.
+
+    profile
+        The name of the profile configuration to use. Defaults to ``github``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion github.get_releases my-github-repo
+    '''
+    client = _get_client(profile)
+    org_name = _get_config_value(profile, 'org_name')
+
+    if repo_name is None:
+        repo_name = _get_config_value(profile, 'repo_name')
+
+    try:
+        repo = client.get_repo('/'.join([org_name, repo_name]))
+        release = repo.get_release()
+    except UnknownObjectException as e:
+        log.exception("Resource not found: {0}".format(str(e)))
+        return False
+
+    return _release_to_dict(release)
+
+
+def _release_to_dict(release):
+    ret = {}
+    if (not release or not release.id):
+        return ret
+
+    ret['id'] = release.id
+    ret['name'] = release.name
+    ret['body'] = release.body
+    ret['draft'] = release.draft
+    ret['prerelease'] = release.prerelease
+    ret['tag_name'] = release.tag_name
+    ret['target_commitish'] = release.target_commitish
+    ret['html_url'] = release.html_url
+    ret['assets_url'] = release.assets_url
+    ret['upload_url'] = release.upload_url
+    ret['tarball_url'] = release.tarball_url
+    ret['zipball_url'] = release.zipball_url
+    ret['author'] = _user_to_dict(release.author)
+    return ret
+
+
 def _commit_to_dict(commit):
     ret = {}
     if (not commit or not commit.sha):
